@@ -1,0 +1,98 @@
+"Phrases"
+{
+	"Enter username"
+	{
+		"en" "Please enter your username"
+		"hu" "Írd be a felhasználónevet"
+	}
+	
+	"Enter password"
+	{
+		"en" "Please enter your password"
+		"hu" "Írd be a jelszót"
+	}
+	
+	"Not logged in"
+	{
+		"en" "You can't do anything until you log-in."
+		"hu" "Amíg nem jelentkezel be addig nem csinálhatsz semmit."
+	}
+	
+	"Succesfully registered"
+	{
+		"en" "You have registered succesfully! Now you can login to your account."
+		"hu" "Sikeresen regisztráltál! Mostmár bejelentkezhetsz."
+	}
+	
+	"Username registered"
+	{
+		"en" "This username is already registered, please use a different one."
+		"hu" "Ez a felhasználónév már foglalt, kérlek válassz másikat."
+	}
+	
+	"Username too short"
+	{
+		"en" "This username is too short, please choose another one."
+		"hu" "Ez a felhasználónév túl rövid, kérlek válassz másikat."
+	}
+	
+	"Password too short"
+	{
+		"en" "This password is too short, please choose another one."
+		"hu" "Ez a jelszó túl rövid, kérlek válassz másikat."
+	}
+	
+	"Logged in"
+	{
+		"en" "You have logged in!"
+		"hu" "Sikeresen bejelentkeztél!"
+	}
+	
+	"Logged out"
+	{
+		"en" "You have logged out!"
+		"hu" "Sikeresen kijelentkeztél!"
+	}
+	
+	"Wrong username or password"
+	{
+		"en" "Wrong username or password!"
+		"hu" "Rossz felhasználónév vagy jelszó!"
+	}
+	
+	"User banned"
+	{
+		"en" "This user is currently banned!"
+		"hu" "Ez a felhasználó jelenleg kivan tiltva!"
+	}
+	
+	"Usage"
+	{
+		"en" "Usage: !lsban <playername>"
+		"hu" "Használat: !lsban <játékosnév>"
+	}
+	
+	"Kick message"
+	{
+		"en" "You didn't logged in for 2 minutes"
+		"hu" "Nem jelentkeztél be időben!"
+	}
+	
+	"Menu enter username"
+	{
+		"en" "Enter username"
+		"hu" "Felhasználónév beírása"
+	}
+	
+	"Menu enter password"
+	{
+		"en" "Enter password"
+		"hu" "Jelszó beírása"
+	}
+	
+	"Menu passwordline"
+	{
+		"en" "Password:"
+		"hu" "Jelszó:"
+	}
+}

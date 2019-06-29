@@ -1,5 +1,5 @@
 #include <sourcemod>
-#include <nexd>
+#include <loginsystem>
 
 #define PLUGIN_NEV	"Login system"
 #define PLUGIN_LERIAS	"Ingame login system"

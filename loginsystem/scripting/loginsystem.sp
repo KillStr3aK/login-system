@@ -1,12 +1,11 @@
 #include <sourcemod>
+#include <nexd>
 
 #define PLUGIN_NEV	"Login system"
 #define PLUGIN_LERIAS	"Ingame login system"
 #define PLUGIN_AUTHOR	"Nexd"
-#define PLUGIN_VERSION	"1.0.0"
+#define PLUGIN_VERSION	"1.0.1"
 #define PLUGIN_URL	"https://github.com/KillStr3aK"
-#define PREFIX "\x01[\x0BLogin-System\x01]"
-#define empty "\0"
 #pragma tabsize 0
 
 bool IsLoggedIn[MAXPLAYERS+1];
@@ -26,6 +25,8 @@ enum
 	Min_Pass,
 	OtherAcc,
 	Tablename,
+	Kickplayers,
+	Kicktime,
 	Settings
 }
 
@@ -47,6 +48,8 @@ public void OnPluginStart()
 	lSettings[Min_Pass] = CreateConVar("ls_min_pass", "6", "Minimum characters for password");
 	lSettings[OtherAcc] = CreateConVar("ls_enable_otheracc", "0", "0 - Login only to the registered account | 1 - Enable login to other accounts ( consider it twice before enabling it! )");
 	lSettings[Tablename] = CreateConVar("ls_database_name", "login_system", "Database name for the login system");
+	lSettings[Kickplayers] = CreateConVar("ls_kick_players", "1", "Kick players if they didn't logged in before the timelimit");
+	lSettings[Kicktime] = CreateConVar("ls_kick_time", "120", "Kick players after if they didn't logged in ( In seconds )");
 	g_adatbazis = CreateConVar("ls_database", "loginsystem", "Database for the plugin ( databases.cfg )");
 
 	AddCommandListener(Block_JoinTeam, "jointeam");
@@ -59,16 +62,28 @@ public void OnPluginStart()
 	LoadTranslations("loginsystem.phrases");
 }
 
+public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max)
+{
+	CreateNative("LS_IsLoggedIn", Native_IsLoggedIn);
+
+	return APLRes_Success;
+}
+
 public void OnClientDisconnect(int client)
 {
+	Username[client] = empty;
+	Password[client] = empty;
+
+	Register_U[client] = false;
+	Register_P[client] = false;
+	Login_U[client] = false;
+	Login_P[client] = false;
 	IsLoggedIn[client] = false;
+	IsRegistered[client] = false;
 }
 
 public Action Block_Commands(int client, const char[] command, int args)
 {
-	if(IsFakeClient(client))
-		return Plugin_Continue;
-
 	if (!IsLoggedIn[client])
 	{
 		return Plugin_Stop;
@@ -92,13 +107,6 @@ public Action Block_JoinTeam(int client, const char[] command, int args)
 	return Plugin_Continue;
 }
 
-public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max)
-{
-	CreateNative("LS_IsLoggedIn", Native_IsLoggedIn);
-
-	return APLRes_Success;
-}
-
 public void OnClientPostAdminCheck(int client)
 {
 	if(!(client < 0) && !(client > MaxClients) && !IsFakeClient(client))
@@ -111,13 +119,14 @@ public void OnClientPostAdminCheck(int client)
 
 		IsLoggedIn[client] = false;
 
-		CreateTimer(120.0, Kick, client, TIMER_FLAG_NO_MAPCHANGE);
+		if(lSettings[Kickplayers].IntValue == 1)
+			CreateTimer(lSettings[Kicktime].FloatValue, Kick, client, TIMER_FLAG_NO_MAPCHANGE);
 	}
 }
 
 public Action Kick(Handle timer, client)
 {
-	if(!IsLoggedIn[client])
+	if(!IsLoggedIn[client] && IsClientInGame(client))
 		KickClient(client, "%T", "Kick message", client);
 }
 
@@ -128,14 +137,20 @@ public void CheckAccount(Handle owner, Handle hndl, const char[] error, any data
 		SQL_FetchString(hndl, 0, username, sizeof(username));
 	}
 
+
 	if(StrEqual(username, empty)){
 		IsRegistered[client] = false;
 		Menu_Register(client, empty, empty);
 	}
 	else {
 		IsRegistered[client] = true;
-		Username[client] = username;
-		Menu_Login(client, Username[client], empty);
+		if(lSettings[OtherAcc].IntValue == 0){
+			Username[client] = username;
+			Menu_Login(client, Username[client], empty);
+		}
+		else {
+			Menu_Login(client, empty, empty);
+		}
 	}
 }
 
@@ -162,7 +177,7 @@ public void OnConfigsExecuted() {
 
 	SQL_TQuery(g_DB, SQLHibaKereso, createTableQuery);
 }
-
+/** Used for test purposes
 stock Action Menu_Welcome(int client)
 {
 	if (IsClientInGame(client))
@@ -182,7 +197,7 @@ stock Action Menu_Welcome(int client)
 		menu.Display(client, MENU_TIME_FOREVER);
 	}
 }
-
+**/
 public int Welcomemenu_Callback(Menu menu, MenuAction action, int client, int itemNum)
 {
 	if (action == MenuAction_Select)
@@ -245,10 +260,13 @@ stock Action Menu_Login(int client, const char[] usrnm, const char[] usrpw)
 		}
 
 		menu.AddItem("", "", ITEMDRAW_SPACER);
-		if(!StrEqual(usrnm, empty) && !StrEqual(usrpw, empty)){
-			menu.AddItem("login", "Login");
-		}
-		else {
+		if(!StrEqual(Username[client], empty) && !StrEqual(Password[client], empty))
+		{
+			if(strlen(Username[client]) >= lSettings[Min_Name].IntValue && strlen(Password[client]) >= lSettings[Min_Pass].IntValue)
+			{
+				menu.AddItem("login", "Login");
+			}
+		} else {
 			menu.AddItem("", "Login", ITEMDRAW_DISABLED);
 		}
 
@@ -304,7 +322,7 @@ public void Credentials(Handle owner, Handle hndl, const char[] error, any data)
 	}
 
 	if(id <= 0) {
-		Menu_Login(client, Username[client], empty);
+		Menu_Login(client, empty, empty);
 		PrintToChat(client, "%s %T", PREFIX, "Wrong username or password", client);
 	} else {
 		PrintToChat(client, "%s %T", PREFIX, "Logged in", client);
@@ -337,10 +355,12 @@ stock Action Menu_Register(int client, const char[] usrnm, const char[] usrpw)
 			menu.AddItem("", HasPassword, ITEMDRAW_DISABLED);
 		}
 		menu.AddItem("", "", ITEMDRAW_SPACER);
-		if(!StrEqual(usrnm, empty) && !StrEqual(usrpw, empty)){
-			menu.AddItem("register", "Register");
-		}
-		else {
+		if(!StrEqual(Username[client], empty) && !StrEqual(Password[client], empty)){
+			if(strlen(Username[client]) >= lSettings[Min_Name].IntValue && strlen(Password[client]) >= lSettings[Min_Pass].IntValue)
+			{
+				menu.AddItem("register", "Register");
+			}
+		} else {
 			menu.AddItem("", "Register", ITEMDRAW_DISABLED);
 		}
 
@@ -379,6 +399,9 @@ public Action OnClientSayCommand(int client, const char[] command, const char[] 
 	if (!IsValidClient(client))
 		return Plugin_Handled;
 
+	if (IsLoggedIn[client])
+		return Plugin_Continue;
+
 	if (!IsLoggedIn[client])
 	{
 		if(Register_U[client])
@@ -405,17 +428,59 @@ public Action OnClientSayCommand(int client, const char[] command, const char[] 
 		}  else if(Login_P[client]){
 			Menu_Login(client, Username[client], args);
 			Login_P[client] = false;
-		} else {
+		} else if(!Register_P[client] || !Register_U[client] || Login_U[client] || Login_P[client]){
 			PrintToChat(client, "%s %T", PREFIX, "Not logged in", client);
 		}
 
-		if(!IsRegistered[client]) {
-			Menu_Register(client, empty, empty);
-		} else if(IsRegistered[client] && !IsLoggedIn[client] && StrEqual(Password[client], empty)){
-			if(lSettings[OtherAcc].IntValue == 0){
-				Menu_Login(client, Username[client], empty);
-			} else if(lSettings[OtherAcc].IntValue == 1){
-				Menu_Login(client, empty, empty);
+		if(IsRegistered[client])
+		{
+			if(!IsLoggedIn[client])
+			{
+				if(lSettings[OtherAcc].IntValue == 0)
+				{
+					if(!StrEqual(Username[client], empty))
+					{
+						if(StrEqual(Password[client], empty))
+						{
+							Menu_Login(client, Username[client], empty);
+						}
+						else if(!StrEqual(Password[client], empty)){
+							Menu_Login(client, Username[client], Password[client]);
+						}
+					}
+				} else if(lSettings[OtherAcc].IntValue == 1)
+				{
+					if(!StrEqual(Username[client], empty)) {
+						if(StrEqual(Password[client], empty))
+						{
+							Menu_Login(client, Username[client], empty);
+						}
+						else
+						{
+							Menu_Login(client, Username[client], Password[client]);
+						}
+					} else {
+						Menu_Login(client, empty, empty);
+					}
+				}
+			}
+		} else if(!IsRegistered[client])
+		{
+			if(StrEqual(Username[client], empty) && StrEqual(Password[client], empty))
+			{
+				if(!Register_U[client])
+				{
+					if(!Register_P[client])
+					{
+						Menu_Register(client, empty, empty);
+					}
+				}
+			} else if(!StrEqual(Username[client], empty))
+			{
+				if(!StrEqual(Password[client], empty))
+				{
+					Menu_Register(client, Username[client], Password[client]);
+				}
 			}
 		}
 
@@ -434,8 +499,10 @@ public void Checkusernames(Handle owner, Handle hndl, const char[] error, any da
 
 	if(id <= 0)
 		Register_Client(client);
-	else
+	else {
 		PrintToChat(client, "%s %T", PREFIX, "Username registered", client);
+		Menu_Register(client, empty, Password[client]);
+	}
 }
 
 stock Action Register_Client(int client)
@@ -456,6 +523,7 @@ stock Action Register_Client(int client)
 	SQL_TQuery(g_DB, SQLHibaKereso, RegisterQuery);
 
 	PrintToChat(client, "%s %T", PREFIX, "Succesfully registered", client);
+	IsRegistered[client] = true;
 	Menu_Login(client, Username[client], empty);
 }
 
@@ -463,12 +531,20 @@ public Action Command_Logout(int client, int args)
 {
 	if (IsClientInGame(client))
 	{
+		if(!IsLoggedIn[client])
+		{
+			PrintToChat(client, "%s %T", PREFIX, "Can't logout", client);
+			return Plugin_Handled;
+		}
+
 		PrintToChat(client, "%s %T", PREFIX, "Logged out", client);
 		ChangeClientTeam(client, 1);
 
 		IsLoggedIn[client] = false;
 		Password[client] = empty;
 	}
+
+	return Plugin_Continue;
 }
 
 public Action Command_LSBan(int client, int args)
@@ -525,12 +601,4 @@ public int Native_IsLoggedIn(Handle myplugin, int argc)
 		return true;
 	else
 		return false;
-}
-
-stock bool IsValidClient(int client)
-{
-	if(client <= 0 ) return false;
-	if(client > MaxClients) return false;
-	if(!IsClientConnected(client)) return false;
-	return IsClientInGame(client);
 }

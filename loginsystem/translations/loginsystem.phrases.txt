@@ -78,6 +78,12 @@
 		"hu" "Nem jelentkeztél be időben!"
 	}
 	
+	"Can't logout"
+	{
+		"en" "Firstly, log-in."
+		"hu" "Először jelentkezz be!"
+	}
+	
 	"Menu enter username"
 	{
 		"en" "Enter username"

@@ -4,7 +4,7 @@
 #define PLUGIN_NEV	"Login system"
 #define PLUGIN_LERIAS	"Ingame login system"
 #define PLUGIN_AUTHOR	"Nexd"
-#define PLUGIN_VERSION	"1.0.1"
+#define PLUGIN_VERSION	"1.0.2"
 #define PLUGIN_URL	"https://github.com/KillStr3aK"
 #pragma tabsize 0
 
@@ -18,6 +18,10 @@ bool Login_P[MAXPLAYERS+1];
 char Username[MAXPLAYERS+1][36];
 char Password[MAXPLAYERS+1][32];
 char lSettingsTableName[32];
+
+Handle OnClientLoggedIn = INVALID_HANDLE;
+Handle OnClientLoggedOut = INVALID_HANDLE;
+Handle OnClientGotBanned = INVALID_HANDLE;
 
 enum
 {
@@ -48,7 +52,7 @@ public void OnPluginStart()
 	lSettings[Min_Pass] = CreateConVar("ls_min_pass", "6", "Minimum characters for password");
 	lSettings[OtherAcc] = CreateConVar("ls_enable_otheracc", "0", "0 - Login only to the registered account | 1 - Enable login to other accounts ( consider it twice before enabling it! )");
 	lSettings[Tablename] = CreateConVar("ls_database_name", "login_system", "Database name for the login system");
-	lSettings[Kickplayers] = CreateConVar("ls_kick_players", "1", "Kick players if they didn't logged in before the timelimit");
+	lSettings[Kickplayers] = CreateConVar("ls_kick_players", "0", "Kick players if they didn't logged in before the timelimit");
 	lSettings[Kicktime] = CreateConVar("ls_kick_time", "120", "Kick players after if they didn't logged in ( In seconds )");
 	g_adatbazis = CreateConVar("ls_database", "loginsystem", "Database for the plugin ( databases.cfg )");
 
@@ -65,6 +69,10 @@ public void OnPluginStart()
 public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max)
 {
 	CreateNative("LS_IsLoggedIn", Native_IsLoggedIn);
+
+	OnClientLoggedIn = CreateGlobalForward("LS_OnClientLoggedIn", ET_Ignore, Param_Cell);
+	OnClientLoggedOut = CreateGlobalForward("LS_OnClientLoggedOut", ET_Ignore, Param_Cell);
+	OnClientGotBanned = CreateGlobalForward("LS_OnClientGotBanned", ET_Ignore, Param_Cell);
 
 	return APLRes_Success;
 }
@@ -117,16 +125,60 @@ public void OnClientPostAdminCheck(int client)
 		Format(CheckForAccount, sizeof(CheckForAccount), "SELECT username FROM %s WHERE steamid = '%s';", lSettingsTableName, steamid);
 		SQL_TQuery(g_DB, CheckAccount, CheckForAccount, client);
 
-		IsLoggedIn[client] = false;
-
 		if(lSettings[Kickplayers].IntValue == 1)
 			CreateTimer(lSettings[Kicktime].FloatValue, Kick, client, TIMER_FLAG_NO_MAPCHANGE);
+
+		CreateTimer(1.0, CheckTeams, client, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
+		CheckIpAddress(client);
 	}
 }
 
-public Action Kick(Handle timer, client)
+public Action CheckTeams(Handle timer, int client)
 {
-	if(!IsLoggedIn[client] && IsClientInGame(client))
+	if(!IsClientInGame(client))
+		return Plugin_Stop;
+
+	if(IsClientLoggedIn(client))
+		return Plugin_Stop;
+
+	if(GetClientTeam(client) > 1)
+		ChangeClientTeam(client, 1);
+
+	return Plugin_Continue;
+}
+
+stock Action CheckIpAddress(int client)
+{
+	char CheckForAccount[256];
+	char steamid[20];
+	GetClientAuthId(client, AuthId_Steam2, steamid, sizeof(steamid));
+	Format(CheckForAccount, sizeof(CheckForAccount), "SELECT ipaddress FROM %s WHERE steamid = '%s';", lSettingsTableName, steamid);
+	SQL_TQuery(g_DB, CheckIpAddress_C, CheckForAccount, client);
+}
+
+public void CheckIpAddress_C(Handle owner, Handle hndl, const char[] error, any data) {
+	int client = data;
+	char playerip[32];
+	while (SQL_FetchRow(hndl)) {
+		SQL_FetchString(hndl, 0, playerip, sizeof(playerip));
+	}
+
+	char clientip[32];
+	GetClientIP(client, clientip, sizeof(clientip));
+
+	if(!StrEqual(playerip, clientip))
+	{
+		char steamid[20];
+		GetClientAuthId(client, AuthId_Steam2, steamid, sizeof(steamid));
+		char UpdateQuery[512];
+		Format(UpdateQuery, sizeof(UpdateQuery), "UPDATE `%s` SET `ipaddress` = '%s' WHERE `%s`.`steamid` = '%s';", lSettingsTableName, clientip, steamid);
+		SQL_TQuery(g_DB, SQLHibaKereso, UpdateQuery);
+	}
+}
+
+public Action Kick(Handle timer, int client)
+{
+	if(IsClientInGame(client) && !IsLoggedIn[client])
 		KickClient(client, "%T", "Kick message", client);
 }
 
@@ -137,12 +189,10 @@ public void CheckAccount(Handle owner, Handle hndl, const char[] error, any data
 		SQL_FetchString(hndl, 0, username, sizeof(username));
 	}
 
-
 	if(StrEqual(username, empty)){
 		IsRegistered[client] = false;
 		Menu_Register(client, empty, empty);
-	}
-	else {
+	} else {
 		IsRegistered[client] = true;
 		if(lSettings[OtherAcc].IntValue == 0){
 			Username[client] = username;
@@ -197,7 +247,7 @@ stock Action Menu_Welcome(int client)
 		menu.Display(client, MENU_TIME_FOREVER);
 	}
 }
-**/
+
 public int Welcomemenu_Callback(Menu menu, MenuAction action, int client, int itemNum)
 {
 	if (action == MenuAction_Select)
@@ -215,7 +265,7 @@ public int Welcomemenu_Callback(Menu menu, MenuAction action, int client, int it
 		}
 	}
 }
-
+**/
 stock Action Menu_Login(int client, const char[] usrnm, const char[] usrpw)
 {
 	if (IsClientInGame(client))
@@ -327,6 +377,10 @@ public void Credentials(Handle owner, Handle hndl, const char[] error, any data)
 	} else {
 		PrintToChat(client, "%s %T", PREFIX, "Logged in", client);
 		IsLoggedIn[client] = true;
+
+		Call_StartForward(OnClientLoggedIn);
+		Call_PushCell(client);
+		Call_Finish();
 	}
 }
 
@@ -388,7 +442,7 @@ public int Registermenu_Callback(Menu menu, MenuAction action, int client, int i
 		if (StrEqual(info, "register"))
 		{
 			char Check[1024];
-			Format(Check, sizeof(Check), "SELECT id FROM %s WHERE username = '%s';", lSettingsTableName, Username[client]); //We're select the ID because if this username is not registered, it returns 0, what means the username is available
+			Format(Check, sizeof(Check), "SELECT id, ipaddress FROM %s WHERE username = '%s';", lSettingsTableName, Username[client]); //We're select the ID because if this username is not registered, it returns 0, what means the username is available
 			SQL_TQuery(g_DB, Checkusernames, Check, client);
 		}
 	}
@@ -434,34 +488,30 @@ public Action OnClientSayCommand(int client, const char[] command, const char[] 
 
 		if(IsRegistered[client])
 		{
-			if(!IsLoggedIn[client])
+			if(lSettings[OtherAcc].IntValue == 0)
 			{
-				if(lSettings[OtherAcc].IntValue == 0)
+				if(!StrEqual(Username[client], empty))
 				{
-					if(!StrEqual(Username[client], empty))
+					if(StrEqual(Password[client], empty))
 					{
-						if(StrEqual(Password[client], empty))
-						{
-							Menu_Login(client, Username[client], empty);
-						}
-						else if(!StrEqual(Password[client], empty)){
-							Menu_Login(client, Username[client], Password[client]);
-						}
+						Menu_Login(client, Username[client], empty);
 					}
-				} else if(lSettings[OtherAcc].IntValue == 1)
-				{
-					if(!StrEqual(Username[client], empty)) {
-						if(StrEqual(Password[client], empty))
-						{
-							Menu_Login(client, Username[client], empty);
-						}
-						else
-						{
-							Menu_Login(client, Username[client], Password[client]);
-						}
-					} else {
-						Menu_Login(client, empty, empty);
+					else if(!StrEqual(Password[client], empty)){
+						Menu_Login(client, Username[client], Password[client]);
 					}
+				}
+			} else if(lSettings[OtherAcc].IntValue == 1)
+			{
+				if(!StrEqual(Username[client], empty)) {
+					if(StrEqual(Password[client], empty))
+					{
+						Menu_Login(client, Username[client], empty);
+					}
+					else {
+						Menu_Login(client, Username[client], Password[client]);
+					}
+				} else {
+					Menu_Login(client, empty, empty);
 				}
 			}
 		} else if(!IsRegistered[client])
@@ -493,15 +543,25 @@ public Action OnClientSayCommand(int client, const char[] command, const char[] 
 public void Checkusernames(Handle owner, Handle hndl, const char[] error, any data) {
 	int client = data;
 	int id;
+	char fetchip[32];
 	while (SQL_FetchRow(hndl)) {
 		id = SQL_FetchIntByName(hndl, "id");
+		SQL_FetchString(hndl, 1, fetchip, sizeof(fetchip));
 	}
 
-	if(id <= 0)
-		Register_Client(client);
-	else {
-		PrintToChat(client, "%s %T", PREFIX, "Username registered", client);
-		Menu_Register(client, empty, Password[client]);
+	char clientip[32];
+	GetClientIP(client, clientip, sizeof(clientip));
+
+	if(!StrEqual(clientip, fetchip))
+	{
+		if(id <= 0)
+			Register_Client(client);
+		else {
+			PrintToChat(client, "%s %T", PREFIX, "Username registered", client);
+			Menu_Register(client, empty, Password[client]);
+		}
+	} else {
+		PrintToChat(client, "%s %T", PREFIX, "Same ip", client);
 	}
 }
 
@@ -542,6 +602,10 @@ public Action Command_Logout(int client, int args)
 
 		IsLoggedIn[client] = false;
 		Password[client] = empty;
+
+		Call_StartForward(OnClientLoggedOut);
+		Call_PushCell(client);
+		Call_Finish();
 	}
 
 	return Plugin_Continue;
@@ -577,6 +641,10 @@ public Action Command_LSBan(int client, int args)
 	PrintToChatAll("%s \x04%s \x01have been banned from the login system", PREFIX, jatekosnev);
 	ClientCommand(celpont, "sm_logout");
 
+	Call_StartForward(OnClientGotBanned);
+	Call_PushCell(client);
+	Call_Finish();
+
 	return Plugin_Continue;
 }
 
@@ -585,20 +653,30 @@ public void SQLHibaKereso(Handle owner, Handle hndl, const char[] error, any dat
 		LogError(error);
 }
 
-stock SQL_FetchIntByName(Handle:query, String:fieldName[], &DBResult:result=DBVal_Error) {
-	
-	new fieldNum;
-	SQL_FieldNameToNum(query, fieldName, fieldNum);
-	
-	return SQL_FetchInt(query, fieldNum, result);
-}
-
 public int Native_IsLoggedIn(Handle myplugin, int argc)
 {
 	int client = GetNativeCell(1);
 
-	if(IsLoggedIn[client])
+	return IsLoggedIn[client];
+}
+
+stock bool IsAct(int client)
+{
+	if(Register_U[client] || Register_P[client] || Login_U[client] || Login_P[client])
 		return true;
 	else
 		return false;
+}
+
+stock bool IsClientLoggedIn(int client)
+{
+	return IsLoggedIn[client];
+}
+
+stock SQL_FetchIntByName(Handle query, const char[] fieldName, &DBResult:result=DBVal_Error) {
+	
+	int fieldNum;
+	SQL_FieldNameToNum(query, fieldName, fieldNum);
+	
+	return SQL_FetchInt(query, fieldNum, result);
 }

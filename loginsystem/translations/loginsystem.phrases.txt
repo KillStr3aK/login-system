@@ -84,6 +84,12 @@
 		"hu" "Először jelentkezz be!"
 	}
 	
+	"Same ip"
+	{
+		"en" "You have already registered an account with this ip address!"
+		"hu" "Már regisztráltál egy fiókot ezzel az ip címmel!"
+	}
+	
 	"Menu enter username"
 	{
 		"en" "Enter username"

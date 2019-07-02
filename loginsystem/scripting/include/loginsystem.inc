@@ -15,13 +15,13 @@
 native bool LS_IsLoggedIn(int client);
 
 /**
- * Called when a player the logged has logged in.
+ * Called when a player has logged in.
  * @param client client that has logged in.
  */
 forward void LS_OnClientLoggedIn(int client);
 
 /**
- * Called when a player the logged has logged out.
+ * Called when a player has logged out.
  * @param client client that has logged out.
  */
 forward void LS_OnClientLoggedOut(int client);

@@ -48,6 +48,12 @@
 		"hu" "Sikeresen bejelentkeztél!"
 	}
 	
+	"Auto Logged in"
+	{
+		"en" "You have been logged in automatically!"
+		"hu" "Automatikusan bejelentkeztél!"
+	}
+	
 	"Logged out"
 	{
 		"en" "You have logged out!"
@@ -90,21 +96,15 @@
 		"hu" "Már regisztráltál egy fiókot ezzel az ip címmel!"
 	}
 	
-	"Menu enter username"
+	"Autologin enabled"
 	{
-		"en" "Enter username"
-		"hu" "Felhasználónév beírása"
+		"en" "You have enabled the autologin!"
+		"hu" "Bekapcsoltad az automatikus bejelentkezést!"
 	}
 	
-	"Menu enter password"
+	"Autologin disabled"
 	{
-		"en" "Enter password"
-		"hu" "Jelszó beírása"
-	}
-	
-	"Menu passwordline"
-	{
-		"en" "Password:"
-		"hu" "Jelszó:"
+		"en" "You have disabled the autologin!"
+		"hu" "Kikapcsoltad az automatikus bejelentkezést!"
 	}
 }

@@ -1,27 +1,14 @@
 #include <sourcemod>
 #include <loginsystem>
+#include <clientprefs>
 
 #define PLUGIN_NEV	"Login system"
 #define PLUGIN_LERIAS	"Ingame login system"
 #define PLUGIN_AUTHOR	"Nexd"
-#define PLUGIN_VERSION	"1.0.2"
+#define PLUGIN_VERSION	"1.0.4"
 #define PLUGIN_URL	"https://github.com/KillStr3aK"
 #pragma tabsize 0
-
-bool IsLoggedIn[MAXPLAYERS+1];
-bool IsRegistered[MAXPLAYERS+1];
-bool Register_U[MAXPLAYERS+1];
-bool Register_P[MAXPLAYERS+1];
-bool Login_U[MAXPLAYERS+1];
-bool Login_P[MAXPLAYERS+1];
-
-char Username[MAXPLAYERS+1][36];
-char Password[MAXPLAYERS+1][32];
-char lSettingsTableName[32];
-
-Handle OnClientLoggedIn = INVALID_HANDLE;
-Handle OnClientLoggedOut = INVALID_HANDLE;
-Handle OnClientGotBanned = INVALID_HANDLE;
+//#pragma newdecls required ?
 
 enum
 {
@@ -31,10 +18,36 @@ enum
 	Tablename,
 	Kickplayers,
 	Kicktime,
+	Cfg,
 	Settings
 }
 
-ConVar lSettings[Settings], g_adatbazis;
+enum
+{
+	Username_C,
+	Password_C,
+	Autologin_C,
+	Cookie_Count
+}
+
+bool IsLoggedIn[MAXPLAYERS+1];
+bool IsRegistered[MAXPLAYERS+1];
+bool Register_U[MAXPLAYERS+1];
+bool Register_P[MAXPLAYERS+1];
+bool Login_U[MAXPLAYERS+1];
+bool Login_P[MAXPLAYERS+1];
+bool Autologin[MAXPLAYERS+1];
+
+char Username[MAXPLAYERS+1][36];
+char Password[MAXPLAYERS+1][32];
+char lSettingsTableName[32];
+
+Handle OnClientLoggedIn = INVALID_HANDLE;
+Handle OnClientLoggedOut = INVALID_HANDLE;
+Handle OnClientGotBanned = INVALID_HANDLE;
+Handle Cookies[Cookie_Count] = INVALID_HANDLE;
+
+ConVar lSettings[Settings];
 Database g_DB;
 
 public Plugin myinfo = 
@@ -54,7 +67,12 @@ public void OnPluginStart()
 	lSettings[Tablename] = CreateConVar("ls_database_name", "login_system", "Database name for the login system");
 	lSettings[Kickplayers] = CreateConVar("ls_kick_players", "0", "Kick players if they didn't logged in before the timelimit");
 	lSettings[Kicktime] = CreateConVar("ls_kick_time", "120", "Kick players after if they didn't logged in ( In seconds )");
-	g_adatbazis = CreateConVar("ls_database", "loginsystem", "Database for the plugin ( databases.cfg )");
+	lSettings[Cfg] = CreateConVar("ls_database", "loginsystem", "Database for the plugin ( databases.cfg )");
+
+	Cookies[Username_C] = RegClientCookie("ls_username", "Username for autologin", CookieAccess_Private);
+	Cookies[Password_C] = RegClientCookie("ls_password", "Password for autologin", CookieAccess_Private);
+	Cookies[Autologin_C] = RegClientCookie("ls_autologin", "Autologin cookie", CookieAccess_Private);
+	SetCookieMenuItem(LS_SettingsMenu, 0, "Login System");
 
 	AddCommandListener(Block_JoinTeam, "jointeam");
 	AddCommandListener(Block_Commands, "say");
@@ -64,6 +82,17 @@ public void OnPluginStart()
 	RegAdminCmd("sm_lsban", Command_LSBan, ADMFLAG_ROOT);
 
 	LoadTranslations("loginsystem.phrases");
+	AutoExecConfig(true, "login_system", "sourcemod");
+
+	for (int i = MaxClients; i > 0; --i)
+    {
+        if (!AreClientCookiesCached(i))
+        {
+            continue;
+        }
+        
+        OnClientCookiesCached(i);
+    }
 }
 
 public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max)
@@ -75,6 +104,28 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
 	OnClientGotBanned = CreateGlobalForward("LS_OnClientGotBanned", ET_Ignore, Param_Cell);
 
 	return APLRes_Success;
+}
+
+public void OnClientCookiesCached(int client) 
+{
+	char Autologin_Value[8];
+	char Username_Value[36];
+	char Password_Value[32];
+	GetClientCookie(client, Cookies[Autologin_C], Autologin_Value, sizeof(Autologin_Value));
+	Autologin[client] = (Autologin_Value[0] != '\0' && StringToInt(Autologin_Value));
+
+	if(Autologin[client]){
+		GetClientCookie(client, Cookies[Username_C], Username_Value, sizeof(Username_Value));
+		GetClientCookie(client, Cookies[Password_C], Password_Value, sizeof(Password_Value));
+
+		if(StrEqual(Username_Value, empty) || StrEqual(Password_Value, empty)){
+			SetClientCookie(client, Cookies[Autologin_C], "0");
+			Autologin[client] = false;
+		} else {
+			Username[client] = Username_Value;
+			Password[client] = Password_Value;
+		}
+	}
 }
 
 public void OnClientDisconnect(int client)
@@ -92,6 +143,9 @@ public void OnClientDisconnect(int client)
 
 public Action Block_Commands(int client, const char[] command, int args)
 {
+	if(client > 0 || client > MaxClients)
+		return Plugin_Continue;
+
 	if (!IsLoggedIn[client])
 	{
 		return Plugin_Stop;
@@ -119,17 +173,23 @@ public void OnClientPostAdminCheck(int client)
 {
 	if(!(client < 0) && !(client > MaxClients) && !IsFakeClient(client))
 	{
-		char CheckForAccount[1024];
-		char steamid[20];
-		GetClientAuthId(client, AuthId_Steam2, steamid, sizeof(steamid));
-		Format(CheckForAccount, sizeof(CheckForAccount), "SELECT username FROM %s WHERE steamid = '%s';", lSettingsTableName, steamid);
-		SQL_TQuery(g_DB, CheckAccount, CheckForAccount, client);
+		if(!Autologin[client]){
+			char CheckForAccount[1024];
+			char steamid[20];
+			GetClientAuthId(client, AuthId_Steam2, steamid, sizeof(steamid));
+			Format(CheckForAccount, sizeof(CheckForAccount), "SELECT username FROM %s WHERE steamid = '%s';", lSettingsTableName, steamid);
+			SQL_TQuery(g_DB, CheckAccount, CheckForAccount, client);
+		} else {
+			CheckUserCredentials(client, Username[client], Password[client]);
+		}
 
 		if(lSettings[Kickplayers].IntValue == 1)
 			CreateTimer(lSettings[Kicktime].FloatValue, Kick, client, TIMER_FLAG_NO_MAPCHANGE);
 
 		CreateTimer(1.0, CheckTeams, client, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
 		CheckIpAddress(client);
+
+		IsLoggedIn[client] = false;
 	}
 }
 
@@ -171,7 +231,7 @@ public void CheckIpAddress_C(Handle owner, Handle hndl, const char[] error, any 
 		char steamid[20];
 		GetClientAuthId(client, AuthId_Steam2, steamid, sizeof(steamid));
 		char UpdateQuery[512];
-		Format(UpdateQuery, sizeof(UpdateQuery), "UPDATE `%s` SET `ipaddress` = '%s' WHERE `%s`.`steamid` = '%s';", lSettingsTableName, clientip, steamid);
+		Format(UpdateQuery, sizeof(UpdateQuery), "UPDATE `%s` SET `ipaddress` = '%s' WHERE `%s`.`steamid` = '%s';", lSettingsTableName, clientip, lSettingsTableName, steamid);
 		SQL_TQuery(g_DB, SQLHibaKereso, UpdateQuery);
 	}
 }
@@ -207,7 +267,7 @@ public void CheckAccount(Handle owner, Handle hndl, const char[] error, any data
 public void OnConfigsExecuted() {
 	char error[255];
 	char db_Database[32];
-	GetConVarString(g_adatbazis, db_Database, sizeof(db_Database));
+	GetConVarString(lSettings[Cfg], db_Database, sizeof(db_Database));
 	GetConVarString(lSettings[Tablename], lSettingsTableName, sizeof(lSettingsTableName));
 	g_DB = SQL_Connect(db_Database, true, error, sizeof(error));
 	
@@ -348,6 +408,57 @@ public int Loginmenu_Callback(Menu menu, MenuAction action, int client, int item
 	}
 }
 
+public void LS_SettingsMenu(int client, CookieMenuAction action, int info, const char[] buffer, int maxlen)
+{
+	SettingsMenu(client);
+}
+
+stock Action SettingsMenu(int client)
+{
+	if(!IsClientLoggedIn(client))
+	{
+		PrintToChat(client, "%s %T", PREFIX, "Not logged in");
+		return Plugin_Handled;
+	}
+
+	Handle Settings_Menu = CreateMenu(SettingsMenuHandler);
+	SetMenuTitle(Settings_Menu, "Login System - Settings%s", Autologin[client] == false?"\nCurrent account will be saved.":"");
+	char Line[128];
+	Format(Line, sizeof(Line), "AUTOLOGIN [%s]", Autologin[client] == true?"✔":"❌");
+	AddMenuItem(Settings_Menu, "toggle", Line);
+	DisplayMenu(Settings_Menu, client, 30);
+
+	return Plugin_Continue;
+}
+
+public int SettingsMenuHandler(Menu menu, MenuAction action, int client, int itemNum)
+{
+	if (action == MenuAction_Select)
+	{		
+		char info[10];
+		GetMenuItem(menu, itemNum, info, sizeof(info));
+		if (StrEqual(info, "toggle"))
+		{
+			if(!Autologin[client]){
+				PrintToChat(client, "%s %T", PREFIX, "Autologin enabled", client);
+				SetClientCookie(client, Cookies[Username_C], Username[client]);
+				SetClientCookie(client, Cookies[Password_C], Password[client]);
+				SetClientCookie(client, Cookies[Autologin_C], "1");
+				Autologin[client] = true;
+			} else if(Autologin[client])
+			{
+				PrintToChat(client, "%s %T", PREFIX, "Autologin disabled", client);
+				SetClientCookie(client, Cookies[Username_C], empty);
+				SetClientCookie(client, Cookies[Password_C], empty);
+				SetClientCookie(client, Cookies[Autologin_C], "0");
+				Autologin[client] = false;
+			}
+
+			SettingsMenu(client);
+		}
+	}
+}
+
 stock Action CheckUserCredentials(int client, const char[] usrnm, const char[] usrpw)
 {
 	char CredentialsQuery[1024];
@@ -375,7 +486,11 @@ public void Credentials(Handle owner, Handle hndl, const char[] error, any data)
 		Menu_Login(client, empty, empty);
 		PrintToChat(client, "%s %T", PREFIX, "Wrong username or password", client);
 	} else {
-		PrintToChat(client, "%s %T", PREFIX, "Logged in", client);
+		if(!Autologin[client])
+			PrintToChat(client, "%s %T", PREFIX, "Logged in", client);
+		else
+			PrintToChat(client, "%s %T", PREFIX, "Auto Logged in", client);
+
 		IsLoggedIn[client] = true;
 
 		Call_StartForward(OnClientLoggedIn);
@@ -673,8 +788,8 @@ stock bool IsClientLoggedIn(int client)
 	return IsLoggedIn[client];
 }
 
-stock SQL_FetchIntByName(Handle query, const char[] fieldName, &DBResult:result=DBVal_Error) {
-	
+stock SQL_FetchIntByName(Handle query, const char[] fieldName, DBResult &result=DBVal_Error)
+{
 	int fieldNum;
 	SQL_FieldNameToNum(query, fieldName, fieldNum);
 	
